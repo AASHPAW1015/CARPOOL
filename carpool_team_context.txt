@@ -304,7 +304,7 @@ PART 7 — WHAT TO PREPARE, BY ROLE
 
 read your row, then go read your functions in carpool_code_spec.txt.
 
-P1 — DATASTORE (arrays, linked list, files)
+HAZEL — DATASTORE (arrays, linked list, files)
   your job: define how a Driver/Booking is stored, build the 5 drivers,
   keep ride history in a linked list, save everything to a text file and
   load it back identical.
@@ -314,7 +314,7 @@ P1 — DATASTORE (arrays, linked list, files)
   functions: initDrivers, addToHistory, saveDrivers, loadDrivers,
              saveHistory, loadHistory.
 
-P2 — SEATQUEUE + PAYMENTSTACK (queue + stack)
+PRINCE — SEATQUEUE + PAYMENTSTACK (queue + stack)
   your job: the seat queue (pop on booking, push back on trip-end/timeout)
   and the payment stack (push each fare, pop to pay, roll back if one fails).
   prepare: get comfortable with queue and stack operations. understand the
@@ -324,7 +324,7 @@ P2 — SEATQUEUE + PAYMENTSTACK (queue + stack)
   functions: initQueue, assignSeat, returnSeats, countFilled,
              pushPayments, processNext, rollbackAll.
 
-P3 — SORTING + SEARCH + LEADERBOARD (sorts, search, the BST)
+DHARMIT — SORTING + SEARCH + LEADERBOARD (sorts, search, the BST)
   your job: implement merge sort, quick sort, insertion sort (all sorting
   drivers by a chosen field), a timing comparison that prints which is
   fastest with Big-O, linear and binary search, AND the BST leaderboard
@@ -340,7 +340,7 @@ P3 — SORTING + SEARCH + LEADERBOARD (sorts, search, the BST)
              compareTimings, linearSearchByCity, binarySearchById,
              insertDriver, inorder, levelOrder, searchDriver.
 
-LEAD (you) — SIMULATION + UI + MAIN + GRAPH + ROUTING
+ASHUTOSH — SIMULATION + UI + MAIN + GRAPH + ROUTING
   your job: the whole connected core plus the routing math. the city graph,
   dijkstra between two cities, the greedy multi-destination route, and the
   SEGMENT FARE formula (PART 4.4 — the centerpiece, be ready to explain it).
@@ -359,22 +359,6 @@ LEAD (you) — SIMULATION + UI + MAIN + GRAPH + ROUTING
              makeRandomCustomer, maybeSpawnRider, the draw* screens,
              raw-mode + readKey, main.
 
-
-=====================================================
-PART 8 — LOCK THESE IN THE NEXT MEETING (before any code)
-=====================================================
-
-  [ ] config.h values — agree on every number (RATE = 21, not 4).
-  [ ] types.h struct fields — write them out together, then FREEZE. no solo
-      edits after this. especially the Driver fields P2 writes and the lead
-      reads (status, wait-start-time).
-  [ ] THE CITY GRAPH — which cities connect to which, and the km on each
-      edge. this is the single most important missing piece: every routing test
-      case (dijkstra(1,5), multiRoute, the fares) needs these exact numbers.
-      draw it once, write the distances, it goes into buildGraph().
-  [ ] who owns main.cpp (the lead).
-  [ ] github repo + how we branch / share.
-  [ ] deadlines per role for "my functions pass their fake-data tests".
 
 
 =====================================================

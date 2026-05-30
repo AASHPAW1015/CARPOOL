@@ -93,7 +93,7 @@ the data shapes. THE single source of truth.
 
 
 =====================================================
-PART 1: DATASTORE  (P1) -- arrays, linked list, files
+PART 1: DATASTORE -- arrays, linked list, files
 =====================================================
 
 function initDrivers()
@@ -140,7 +140,7 @@ function saveHistory(historyList) / loadHistory()
 
 
 =====================================================
-PART 2A: SEATQUEUE  (P2) -- FIFO seat allocation
+PART 2A: SEATQUEUE -- FIFO seat allocation
 =====================================================
 
 function initQueue(drivers)
@@ -190,7 +190,7 @@ helper countFilled(driver)
 
 
 =====================================================
-PART 2B: PAYMENTSTACK  (P2) -- LIFO, per-person pay + rollback
+PART 2B: PAYMENTSTACK  -- LIFO, per-person pay + rollback
 =====================================================
 // this is the legit "why a stack": a multi-person payment that fails
 // partway must unwind in REVERSE order. LIFO = natural fit.
@@ -224,7 +224,7 @@ function rollbackAll(payStack)
 
 
 =====================================================
-PART 3A: SORTING  (P3) -- 3 algorithms + complexity
+PART 3A: SORTING  -- 3 algorithms + complexity
 =====================================================
 // criteria = "rides" or "rating" -- a string telling it what field to sort on
 
@@ -251,7 +251,7 @@ function compareTimings(drivers)
 
 
 =====================================================
-PART 3B: SEARCH  (P3) -- linear + binary
+PART 3B: SEARCH  -- linear + binary
 =====================================================
 
 function linearSearchByCity(drivers, city)
@@ -270,7 +270,7 @@ function binarySearchById(sortedDrivers, id)
 
 
 =====================================================
-PART 4A: GRAPH  (LEAD) -- city network + Dijkstra
+PART 4A: GRAPH   -- city network + Dijkstra
 =====================================================
 
 function buildGraph()
@@ -323,7 +323,7 @@ function dfsAllPaths(graph, startCity, endCity)
 
 
 =====================================================
-PART 4B: ROUTING  (LEAD) -- multi-dest + THE FARE FORMULA
+PART 4B: ROUTING  -- multi-dest + THE FARE FORMULA
 =====================================================
 
 function multiRoute(graph, startCity, dests[])
@@ -377,7 +377,7 @@ helper isOnSegment(passenger, cityA, cityB, fullPath)
 
 
 =====================================================
-PART 4C: LEADERBOARD  (P3) -- BST by rides served
+PART 4C: LEADERBOARD  -- BST by rides served
 =====================================================
 
 function insertDriver(root, driver)
@@ -416,7 +416,7 @@ function searchDriver(root, key)
 
 
 =====================================================
-PART 5: SIMULATION  (YOU) -- time tick + movement
+PART 5: SIMULATION   -- time tick + movement
 =====================================================
 
 function tick(drivers, seatQueue, simTime, graph)
@@ -469,7 +469,7 @@ function completeTrip(driver, seatQueue)
 
 
 =====================================================
-PART 6: UI  (YOU) -- termios raw mode + ANSI
+PART 6: UI   -- termios raw mode + ANSI
 =====================================================
 // hard to unit-test; eyeball it. keep draw functions PURE:
 // they read state and print, they do NOT change game state.
@@ -489,7 +489,7 @@ input handling:
 
 
 =====================================================
-PART 7: MAIN  (YOU) -- the glue / state machine
+PART 7: MAIN   -- the glue / state machine
 =====================================================
 
 states: HOME, MAP_SELECT, SEAT, RIDE, PAYMENT
@@ -527,12 +527,4 @@ THE FARE FORMULA (the one that matters, restated)
       sum of all fares = sum over segments of (RATE*km/n * n) = RATE * totalKm
 
 
-=====================================================
-MEETING: LOCK BEFORE ANYONE CODES
-=====================================================
-  [ ] config.h values (esp RATE = 21, not the old 4)
-  [ ] types.h struct fields -- frozen, no solo edits
-  [ ] the city graph: which cities connect, km on each edge
-      -> goes into buildGraph(), drives every routing test case
-  [ ] who writes main.cpp (you)
-  [ ] how you share code (github recommended)
+
