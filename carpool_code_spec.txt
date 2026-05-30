@@ -1,0 +1,538 @@
+CARPOOLING APP - FULL CODE SPEC (PSEUDOCODE)
+=============================================
+
+how to read this:
+- every function is written as:  input -> logic -> output
+- "logic" is pseudocode, NOT final C++. coder can write it however they want.
+- the contract is INPUT and OUTPUT. match those and integration just works.
+- numbers come from config.h. structs come from types.h. nobody redefines those.
+
+
+=====================================================
+PART 0: SHARED FILES (LOCK THESE FIRST, NO ONE EDITS ALONE)
+=====================================================
+
+------ config.h ------
+constants everyone shares. change here = changes everywhere.
+
+  SPEED        = 2       // km per sim-minute
+  TIME_SCALE   = 2.5     // sim-minutes per 1 real second
+  RATE         = 21      // rupees per km (full taxi rate, split per segment)
+  SEATS        = 3       // seats per driver
+  DRIVERS      = 5       // total drivers
+  WAIT_TIMEOUT = 10      // sim-minutes a driver waits before partial depart
+                         // (= 4 real seconds, since 10 / 2.5)
+
+  derived (handy): car moves SPEED * TIME_SCALE = 5 km per real second
+
+
+------ types.h ------
+the data shapes. THE single source of truth.
+
+  struct Edge {
+      int    toCity;
+      double km;
+  }
+
+  struct City {
+      int          id;          // 1..5
+      string       name;
+      list<Edge>   neighbors;   // adjacency list
+  }
+
+  struct Seat {
+      bool filled;
+      int  passengerSource;     // city id where they board
+      int  passengerDest;       // city id where they get off
+      int  customerId;
+  }
+
+  struct Driver {
+      int    id;
+      string name;
+      int    homeCity;
+      int    currentCity;
+      Seat   seats[SEATS];
+      // trip state
+      enum   { EMPTY, WAITING, TRAVELLING } status;
+      double waitStartTime;     // sim-time first passenger boarded
+      list<int> route;          // full path of city ids, set after seats lock
+      double totalKm;
+      double travelledKm;       // how far along the route, for the animation
+      int    ridesServedToday;  // for leaderboard / dashboard
+  }
+
+  struct Customer {
+      int    id;
+      string name;
+      int    sourceCity;
+      int    destCity;
+  }
+
+  struct Booking {
+      int    bookingId;
+      int    customerId;
+      int    driverId;
+      int    seatNumber;
+      double fare;              // filled in after segment pricing
+      bool   active;
+  }
+
+  // for the seat queue
+  struct SeatSlot {
+      int driverId;
+      int seatNumber;   // 0..SEATS-1
+  }
+
+  // for the payment stack
+  struct Payment {
+      int    customerId;
+      double amount;
+      bool   paid;
+  }
+
+
+=====================================================
+PART 1: DATASTORE  (P1) -- arrays, linked list, files
+=====================================================
+
+function initDrivers()
+  input:  none
+  logic:
+      make array of DRIVERS drivers
+      for i in 0..DRIVERS-1:
+          driver.id = i+1
+          driver.homeCity = i+1
+          driver.currentCity = i+1
+          driver.status = EMPTY
+          driver.ridesServedToday = 0
+          all seats filled=false
+  output: Driver[]   (length DRIVERS)
+  test:   length == 5 ; drivers[2].homeCity == 3 ; all seats empty
+
+
+function addToHistory(historyList, booking)
+  input:  linked list of past bookings, one new booking
+  logic:  prepend booking to head of list   (newest first)
+  output: none (list mutated)
+  test:   add A then B -> head == B
+
+
+function saveDrivers(drivers)
+  input:  Driver[]
+  logic:  write each driver's fields to data/drivers.txt, one per line
+  output: bool (true = saved ok)
+  test:   returns true ; file exists after call
+
+
+function loadDrivers()
+  input:  none
+  logic:  read data/drivers.txt, rebuild Driver objects
+  output: Driver[]
+  test:   saveDrivers then loadDrivers -> same id/home/rides for each
+
+
+function saveHistory(historyList) / loadHistory()
+  input:  list / none
+  logic:  write/read bookings to data/history.txt
+  output: bool / linked list
+  test:   2 bookings survive a save->load round trip
+
+
+=====================================================
+PART 2A: SEATQUEUE  (P2) -- FIFO seat allocation
+=====================================================
+
+function initQueue(drivers)
+  input:  Driver[]
+  logic:
+      make empty queue
+      for each driver:
+          for seatNum in 0..SEATS-1:
+              push SeatSlot{driver.id, seatNum}
+  output: queue<SeatSlot>
+  test:   queue size == DRIVERS * SEATS == 15
+
+
+function assignSeat(seatQueue, customer, drivers, simTime)
+  input:  queue (by ref), one customer, driver list, current sim time
+  logic:
+      if queue empty: return false
+      slot = queue.pop_front()
+      driver = find driver by slot.driverId
+      seat = driver.seats[slot.seatNumber]
+      seat.filled = true
+      seat.passengerSource = customer.sourceCity
+      seat.passengerDest   = customer.destCity
+      seat.customerId      = customer.id
+      if this is driver's FIRST filled seat:
+          driver.status = WAITING
+          driver.waitStartTime = simTime
+      return true
+  output: bool (assigned or not)
+  test:   after 1 call -> queue size 14, exactly one seat filled
+          empty queue -> returns false
+
+
+function returnSeats(seatQueue, driver)
+  input:  queue (by ref), a driver
+  logic:
+      for each seat in driver that is NOT filled:
+          push SeatSlot{driver.id, seatIndex} back to queue
+  output: none
+  test:   driver with 1/3 filled -> 2 slots pushed back
+
+
+helper countFilled(driver)
+  input:  driver
+  logic:  count seats where filled == true
+  output: int 0..3
+
+
+=====================================================
+PART 2B: PAYMENTSTACK  (P2) -- LIFO, per-person pay + rollback
+=====================================================
+// this is the legit "why a stack": a multi-person payment that fails
+// partway must unwind in REVERSE order. LIFO = natural fit.
+
+function pushPayments(payStack, fares)
+  input:  stack (by ref), array of {customerId, amount}
+  logic:  for each fare in order: push Payment{customerId, amount, paid=false}
+  output: none
+  test:   push 3 -> size 3, top == last pushed
+
+
+function processNext(payStack)
+  input:  stack (by ref)
+  logic:
+      if empty: return null
+      p = payStack.pop()
+      p.paid = true
+      return p
+  output: Payment (the one just paid) or null
+  test:   pop order is reverse of push order
+
+
+function rollbackAll(payStack)
+  input:  stack (by ref)
+  logic:
+      while not empty:
+          p = payStack.pop()
+          reverse p   // undo any side effect, mark unpaid
+  output: none
+  test:   after rollback -> stack empty, nothing marked paid
+
+
+=====================================================
+PART 3A: SORTING  (P3) -- 3 algorithms + complexity
+=====================================================
+// criteria = "rides" or "rating" -- a string telling it what field to sort on
+
+function mergeSortDrivers(drivers, criteria)
+function quickSortDrivers(drivers, criteria)
+function insertionSortDrivers(drivers, criteria)
+  input:  Driver[] (by ref), criteria string
+  logic:  classic version of each algorithm, comparing the chosen field
+  output: none (sorted in place, non-decreasing)
+  test:   output non-decreasing ; all 3 produce identical order on same input
+
+
+function compareTimings(drivers)
+  input:  Driver[]
+  logic:
+      make 3 copies
+      time mergeSort, quickSort, insertionSort on each copy
+      print each time + Big-O:
+          merge     O(n log n)
+          quick     O(n log n) avg, O(n^2) worst
+          insertion O(n^2)
+  output: none (prints table)
+  test:   all 3 sorted results identical
+
+
+=====================================================
+PART 3B: SEARCH  (P3) -- linear + binary
+=====================================================
+
+function linearSearchByCity(drivers, city)
+  input:  Driver[], city id
+  logic:  scan all, collect indices where currentCity == city
+  output: int[]  (indices of matching drivers)
+  test:   known city returns expected count
+
+
+function binarySearchById(sortedDrivers, id)
+  input:  Driver[] SORTED BY ID, target id
+  logic:  classic binary search on id
+  output: Driver* or null
+  test:   present id -> found ; absent id -> null
+          (precondition: array sorted by id)
+
+
+=====================================================
+PART 4A: GRAPH  (LEAD) -- city network + Dijkstra
+=====================================================
+
+function buildGraph()
+  input:  none
+  logic:
+      make 5 City nodes
+      add weighted edges using the REAL map distances
+      (this is the single source of truth for the map -- agree on it
+       in the meeting and hardcode it here)
+  output: Graph
+  test:   node count == 5 ; edge count == (whatever your map has)
+
+
+function dijkstra(graph, startCity, endCity)
+  input:  graph, start id, end id
+  logic:
+      standard dijkstra with a min-priority-queue
+      track dist[] and prev[]
+      rebuild path from prev[]
+  output: { path: int[], distance: double }
+  test:   on your map, dijkstra(1,5) -> known shortest path + correct km
+
+
+function bfsReachable(graph, startCity, endCity)
+  input:  graph, start id, end id
+  logic:  // plain BFS -- can we even get there? (run BEFORE dijkstra)
+      visited = empty set
+      q = queue with startCity
+      mark startCity visited
+      while q not empty:
+          c = q.pop_front()
+          if c == endCity: return true
+          for each neighbor of c not visited:
+              mark visited, q.push(neighbor)
+      return false
+  output: bool (is endCity reachable from startCity)
+  test:   on your map, bfsReachable(1,5) == true ;
+          an isolated city -> false
+
+
+function dfsAllPaths(graph, startCity, endCity)
+  input:  graph, start id, end id
+  logic:  // plain DFS -- list every simple path (for a display/debug screen)
+      recurse from startCity, tracking the current path + visited set
+      when you reach endCity, save a copy of the path
+      backtrack (unmark) and keep exploring
+  output: list of int[]  (every simple path from start to end)
+  test:   start==end -> one path of length 1 ;
+          count matches hand-traced paths on your small map
+
+
+=====================================================
+PART 4B: ROUTING  (LEAD) -- multi-dest + THE FARE FORMULA
+=====================================================
+
+function multiRoute(graph, startCity, dests[])
+  input:  graph, start city, list of destination cities (1..3 of them)
+  logic:  // greedy nearest-neighbour, chaining dijkstra
+      fullPath = [startCity]
+      totalKm  = 0
+      current  = startCity
+      remaining = dests
+      while remaining not empty:
+          pick d in remaining with smallest dijkstra(current,d).distance
+          r = dijkstra(current, d)
+          append r.path (minus the duplicated current) to fullPath
+          totalKm += r.distance
+          current = d
+          remove d from remaining
+  output: { fullPath: int[], totalKm: double }
+  test:   dests {3,5} from 1 -> path includes 3 and 5 ;
+          totalKm >= dijkstra(1, farthest dest).distance
+
+
+function segmentFares(fullPath, graph, passengers[])
+  input:  the full route (city ids in order),
+          graph (for segment km),
+          passengers[] (each has source + dest city)
+  logic:  // THE pricing. per segment, split RATE*km by who's aboard.
+      fare[p] = 0  for every passenger p
+      for each consecutive pair (cityA, cityB) in fullPath:
+          segKm = edge km between cityA and cityB
+          aboard = []
+          for each passenger p:
+              if p is ON this segment:   // boarded at/before A, gets off at/after B
+                  aboard.add(p)
+          if aboard not empty:
+              share = (RATE * segKm) / aboard.size()
+              for each p in aboard:
+                  fare[p] += share
+  output: double[]  (fare per passenger, same order as input)
+  test:   route A-B-C-D (10km each), RATE 21,
+          C1:A->D  C2:A->C  C3:A->B
+          -> fares [385, 175, 70]
+          -> sum of fares == RATE * totalKm == 630
+
+
+helper isOnSegment(passenger, cityA, cityB, fullPath)
+  input:  passenger, the two segment-endpoint cities, the route
+  logic:
+      find index of passenger.source and passenger.dest within fullPath
+      segment is covered if  sourceIndex <= indexOf(A)  AND  destIndex >= indexOf(B)
+  output: bool
+
+
+=====================================================
+PART 4C: LEADERBOARD  (P3) -- BST by rides served
+=====================================================
+
+function insertDriver(root, driver)
+  input:  BST root (null if empty), driver
+  logic:  standard BST insert, key = ridesServedToday
+  output: new root
+  test:   insert 5 -> tree valid
+
+
+function inorder(root)
+  input:  BST root
+  logic:  inorder traversal, collect drivers   // inorder IS a depth-first (DFS) walk
+  output: Driver[]  (ascending by rides served)
+  test:   inorder of 5 inserted drivers is sorted ascending
+
+
+function levelOrder(root)
+  input:  BST root
+  logic:  // breadth-first (BFS) walk -- print the tree row by row, uses a queue
+      q = queue with root
+      while q not empty:
+          n = q.pop_front()
+          visit n
+          if n.left:  q.push(n.left)
+          if n.right: q.push(n.right)
+  output: Driver[]  (top of tree first, then each level down)
+  test:   root comes out first ; every node appears exactly once
+
+
+function searchDriver(root, key)
+  input:  BST root, the key to find (ridesServedToday, or id if keyed on id)
+  logic:  // BST search -- O(log n) on a balanced tree. matches "log n where possible".
+      walk down: if key < node, go left; if key > node, go right; else found
+  output: Driver* or null
+  test:   present key -> found in <= height steps ; absent key -> null
+
+
+=====================================================
+PART 5: SIMULATION  (YOU) -- time tick + movement
+=====================================================
+
+function tick(drivers, seatQueue, simTime, graph)
+  input:  driver list, seat queue (by ref), sim time (by ref), graph
+  logic:  // called once per real second
+      simTime += TIME_SCALE
+      for each driver:
+          if driver.status == WAITING:
+              waited = simTime - driver.waitStartTime
+              if countFilled(driver) == SEATS:
+                  departDriver(driver, graph)          // full -> go
+              else if waited >= WAIT_TIMEOUT:
+                  if countFilled(driver) >= 1:
+                      returnSeats(seatQueue, driver)
+                      departDriver(driver, graph)      // partial -> go
+                  else:
+                      driver.status = EMPTY             // nobody -> cancel
+          else if driver.status == TRAVELLING:
+              driver.travelledKm += SPEED * TIME_SCALE  // +5 km/real sec
+              if driver.travelledKm >= driver.totalKm:
+                  completeTrip(driver, seatQueue)
+  output: none
+  test:   car needing 20km finishes in 4 ticks ;
+          a 1/3-filled car departs at tick 4 (10 sim-min)
+
+
+function departDriver(driver, graph)
+  input:  driver, graph
+  logic:
+      dests = unique passengerDest of all filled seats
+      r = multiRoute(graph, driver.currentCity, dests)
+      driver.route = r.fullPath
+      driver.totalKm = r.totalKm
+      driver.travelledKm = 0
+      driver.status = TRAVELLING
+      // fares get computed here too (segmentFares) and pushed to pay stack
+  output: none
+
+
+function completeTrip(driver, seatQueue)
+  input:  driver, seat queue (by ref)
+  logic:
+      driver.currentCity = last city in route
+      reset all seats to empty
+      push all 3 seats back to seatQueue
+      driver.currentCity = driver.homeCity   // return home (or animate back)
+      driver.status = EMPTY
+      driver.ridesServedToday += 1
+  output: none
+
+
+=====================================================
+PART 6: UI  (YOU) -- termios raw mode + ANSI
+=====================================================
+// hard to unit-test; eyeball it. keep draw functions PURE:
+// they read state and print, they do NOT change game state.
+
+screens / functions:
+  drawHome(drivers)        -> ambient sim: all cars moving, city colour-coded,
+                              3 dots under each car = seats filled
+  drawMapSelect(state)     -> ascii map, arrow keys move highlight box,
+                              Enter confirms city
+  drawSeatScreen(driver, mySeat) -> shows driver id, my seat, others filling
+  drawRideSim(driver)      -> car animates path, chosen route highlighted
+  drawPayment(myFare)      -> amount + [Pay] button; on click -> back to home
+
+input handling:
+  enableRawMode() / disableRawMode()   -- termios
+  readKey() -> returns UP/DOWN/LEFT/RIGHT/ENTER
+
+
+=====================================================
+PART 7: MAIN  (YOU) -- the glue / state machine
+=====================================================
+
+states: HOME, MAP_SELECT, SEAT, RIDE, PAYMENT
+
+main loop:
+  drivers   = initDrivers() (or loadDrivers())
+  seatQueue = initQueue(drivers)
+  payStack  = empty
+  graph     = buildGraph()
+  history   = loadHistory()
+  simTime   = 0
+  state     = HOME
+
+  loop:
+      tick(drivers, seatQueue, simTime, graph)   // sim keeps running
+      switch state:
+          HOME:    drawHome(); if start pressed -> MAP_SELECT
+          MAP_SELECT: city = drawMapSelect(); assignSeat(...); -> SEAT
+          SEAT:    drawSeatScreen(); when my driver departs -> RIDE
+          RIDE:    drawRideSim(); when my trip done -> PAYMENT
+          PAYMENT: drawPayment(myFare)
+                   on Pay: processNext(payStack); addToHistory(...); -> HOME
+
+
+=====================================================
+THE FARE FORMULA (the one that matters, restated)
+=====================================================
+  fare(person) = SUM over every segment they ride of:
+                     RATE * segment_km / (people aboard that segment)
+
+  - share the discount only WHILE actually sharing
+  - ride a stretch alone -> pay full RATE there
+  - if all 3 ride the whole way -> everyone pays RATE/3 per km (= 7/km)
+  - driver ALWAYS earns RATE * totalKm. guaranteed. proven by:
+      sum of all fares = sum over segments of (RATE*km/n * n) = RATE * totalKm
+
+
+=====================================================
+MEETING: LOCK BEFORE ANYONE CODES
+=====================================================
+  [ ] config.h values (esp RATE = 21, not the old 4)
+  [ ] types.h struct fields -- frozen, no solo edits
+  [ ] the city graph: which cities connect, km on each edge
+      -> goes into buildGraph(), drives every routing test case
+  [ ] who writes main.cpp (you)
+  [ ] how you share code (github recommended)

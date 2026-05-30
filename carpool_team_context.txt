@@ -1,0 +1,385 @@
+CARPOOLING APP — FULL TEAM CONTEXT (READ THIS FIRST)
+=====================================================
+
+how to use this document:
+  1. read this whole thing once. it's the big picture — what we're
+     building, how it behaves, and how the code is split.
+  2. then open carpool_code_spec.txt — that has every function written
+     as input -> logic -> output, with a test case for each.
+  3. find YOUR section in the spec (your name / role is marked P1, P2, P3,
+     or LEAD).
+  4. you can code your functions HOWEVER you want inside. the only thing
+     that must match exactly is the INPUT and the OUTPUT. that's the deal.
+
+if you understand this doc, the spec will make sense. if you skip this
+doc, the spec will look like a pile of random functions. don't skip it.
+
+
+=====================================================
+PART 1 — WHAT WE'RE BUILDING
+=====================================================
+
+a terminal-based INTERCITY CARPOOLING app, in C++, for the DSA mini-project.
+
+the idea: 5 cities, 5 drivers (one parked in each city). a customer says
+"i'm in city 2, take me to city 5". they get matched to a driver, share the
+ride with up to 2 other people going roughly the same way, the app picks the
+best route, splits the cost fairly, and shows the whole thing animating in
+the terminal.
+
+it is NOT a ride-hailing app (no door-to-door pickup). it's CARPOOLING:
+everyone meets at a city's pickup point, the car fills up, then it goes.
+this is the choice that keeps the routing simple and the project finishable.
+
+the whole thing runs live in the terminal — cars actually move on screen,
+seats actually fill, time actually passes. that's what makes the demo good.
+
+every data-structure / algorithm the project requires has a real job here.
+nothing is bolted on just to tick a box:
+  - QUEUE   -> hands out seats fairly (first come first served)
+  - STACK   -> per-person payments, and undoing them if one fails
+  - GRAPH   -> the city map
+  - DIJKSTRA-> shortest path between cities
+  - BFS/DFS -> BFS checks a city is reachable before Dijkstra runs; DFS lists
+               all paths. (on the tree: inorder = DFS, level-order = BFS too)
+  - GREEDY  -> chaining shortest paths to cover all 3 destinations
+  - BST     -> driver leaderboard (who served the most riders) + O(log n) search
+  - SORTING -> rank drivers/rides (and we compare 3 algorithms for the report)
+  - SEARCH  -> linear + binary, to find drivers
+  - ARRAYS / LINKED LIST / FILE I/O -> store drivers, history, save & load
+
+
+=====================================================
+PART 2 — THE RULES OF THE WORLD (memorize these)
+=====================================================
+
+these are fixed numbers everyone shares. they live in config.h. nobody
+hardcodes them anywhere else — you include config.h and use the name.
+
+  SPEED        = 2 km per sim-minute       (every car, fixed)
+  TIME_SCALE   = 2.5 sim-minutes per 1 real second
+  RATE         = 21 rupees per km          (full taxi rate)
+  SEATS        = 3 per driver
+  DRIVERS      = 5
+  WAIT_TIMEOUT = 10 sim-minutes a half-empty driver waits before leaving
+
+things that fall out of those numbers (handy for sanity checks):
+  - a car moves 2 x 2.5 = 5 km on screen per real second
+  - the 10-minute wait = 10 / 2.5 = 4 real seconds
+  - a 30 km trip takes 15 sim-min = 6 real seconds
+
+IMPORTANT: the rate is 21, NOT 4. earlier drafts said 4 — that's dead.
+21/km is the number. it only exists in config.h.
+
+
+=====================================================
+PART 3 — THE FULL JOURNEY, STEP BY STEP
+=====================================================
+
+this is what happens from the moment the app opens. screens the user SEES
+are marked [SCREEN]. steps that happen invisibly behind a screen are marked
+[BEHIND]. (the flowchart picture shows this same thing — purple = screen,
+teal = behind, amber = the decision.)
+
+STEP 0  [SCREEN] HOME
+   the map is drawn in ascii. cars are already moving around on their own —
+   filling up, driving, dropping off, coming back. this is the "ambient
+   simulation" (see PART 4.5). it's alive before the user does anything.
+   user presses a key to start booking.
+
+STEP 1  [SCREEN] MAP SELECT
+   the user navigates the cities with ARROW KEYS (not by typing a number).
+   a highlight box moves between cities; ENTER confirms. this uses raw
+   terminal mode (termios) + ANSI escape codes for the live cursor feel.
+
+STEP 2  [BEHIND] ASSIGN SEAT
+   the instant they confirm a city, the app pops a seat off the QUEUE and
+   assigns it to them. their seat is now reserved. (the queue is how we stay
+   fair — whoever asked first gets the next free seat.)
+
+STEP 3  [SCREEN] SEAT SCREEN
+   shows: which driver you got, which seat is yours, and the other 2 seats
+   filling up live (from other real users, or from random ambient riders).
+   you watch the car fill.
+
+STEP 4  [BEHIND, every tick] THE DECISION — does the car leave?
+   checked constantly while the car waits:
+     - all 3 seats full           -> LEAVE NOW
+     - 10 min passed AND >=1 rider -> LEAVE with whoever's aboard
+                                      (empty seats go back to the queue)
+     - 10 min passed AND 0 riders  -> CANCEL, car stays, no route computed
+   (in the ambient home sim this is what makes cars leave half-full sometimes
+   — that's intentional, it looks real.)
+
+STEP 5  [BEHIND] ROUTE COMPUTED
+   now we know the destinations (1 to 3 cities). we run DIJKSTRA + GREEDY
+   to find the shortest route that covers all of them, starting from where
+   the car is. (see PART 4.3.) this gives us the path and the total km.
+
+STEP 6  [BEHIND] FARES SPLIT
+   using the route, we calculate each rider's fair share with the
+   SEGMENT formula (see PART 4.4 — this is the clever bit). each person's
+   fare gets pushed onto the payment STACK.
+
+STEP 7  [SCREEN] RIDE SIM
+   the car animates along its route, the chosen path drawn in a different
+   colour. live clock. when the distance travelled reaches the total km,
+   the ride is done.
+
+STEP 8  [SCREEN] PAYMENT
+   shows the user their fare and a [Pay] button. clicking it pops their
+   payment off the stack and marks it paid. (if a multi-person payment ever
+   fails partway, the stack unwinds in reverse — that's WHY it's a stack.)
+
+STEP 9  back to HOME. the driver returns to its home city, its 3 seats go
+   back into the queue, its "rides served today" goes up by one (that feeds
+   the leaderboard / dashboard). the loop continues.
+
+
+=====================================================
+PART 4 — THE FIVE IDEAS YOU MUST UNDERSTAND
+=====================================================
+
+if you get these five, you understand the whole app. everything in the
+spec is just these ideas turned into functions.
+
+--- 4.1  THE SEAT QUEUE (fairness) ---
+all the seats from all drivers go into one queue at startup:
+   [D1-S1, D1-S2, D1-S3, D2-S1, D2-S2, D2-S3, ... ]  (5 x 3 = 15 slots)
+a booking POPS the front slot. when a trip finishes, those 3 seats get
+PUSHED back to the rear. when a half-empty car leaves, its unused seats
+get pushed back too. first-come-first-served, automatically. that's the
+entire point of using a queue here.
+
+--- 4.2  THE DEPARTURE DECISION (the timer) ---
+the moment a car's FIRST seat fills, a timer starts (we stamp the sim-time).
+every tick we check: full? or has 10 min passed? this is the amber diamond
+in the flowchart. the key wiring detail: the function that fills a seat
+(P2) WRITES the start-time; the simulation (the team lead's tick) READS it.
+two people's code touching the same field — get the field name right.
+
+--- 4.3  THE ROUTE (dijkstra + greedy) ---
+dijkstra finds the shortest path between TWO cities. but a full car has up
+to 3 destinations. so we chain it greedily:
+   start at the car's city
+   repeatedly: of the destinations not yet visited, go to the NEAREST one
+               (dijkstra to it), then continue from there
+   until all destinations are covered
+that produces one full path covering everyone, and the total km.
+
+--- 4.4  THE FAIR FARE (the segment formula) — the heart of the project ---
+naive idea: charge everyone the same per-km. UNFAIR — someone going a short
+hop pays the same rate as someone going the whole way, and if one person
+rides a lonely stretch alone the driver loses money.
+
+the fix: charge RATE per km on each ROAD SEGMENT, then SPLIT that segment's
+cost among ONLY the people actually in the car on that segment.
+
+   fare(person) = SUM over every segment they ride of:
+                      RATE x segment_km / (number of people aboard that segment)
+
+worked example — route A->B->C->D, 10 km each, RATE 21:
+   riders:  C1: A->D   C2: A->C   C3: A->B
+
+   segment A-B (10km): C1,C2,C3 aboard (3) -> 21x10/3 = 70 each
+   segment B-C (10km): C1,C2 aboard (2)    -> 21x10/2 = 105 each
+   segment C-D (10km): C1 alone (1)        -> 21x10/1 = 210
+
+   C3 pays 70      (short hop, shared the whole time -> cheap)
+   C2 pays 175     (70 + 105)
+   C1 pays 385     (70 + 105 + 210; rode the lonely tail alone -> full rate there)
+
+   driver earns 70x3 + 105x2 + 210 = 630 = 21 x 30km  (ALWAYS full fare)
+
+why it's fair: you get the discount only WHILE you're actually sharing.
+ride alone -> pay full. if all 3 ride the whole way, every segment has 3
+people, so everyone pays 21/3 = 7 per km — the simple split, as a special
+case. the driver always collects exactly RATE x total_km. guaranteed.
+
+--- 4.5  THE AMBIENT SIM (random life on the home screen) ---
+on the home screen nobody's really booking, so we GENERATE fake riders so
+the cars move on their own. the world is "full ambient": cars fill, depart,
+drive the real dijkstra route, complete, return home, repeat — all using the
+exact same tick() and assignSeat() as the real flow. we just feed it random
+input instead of keyboard input.
+
+calm pacing: every ~45 sim-minutes (~18 real sec) we roll a dice, and ~40%
+of the time a random rider appears (random source city, random different
+destination). riders trickle in; cars often leave half-full on the timeout;
+different cars are in different states at any moment. that's what sells it.
+
+two gotchas:
+  - call srand(time(0)) ONCE at the top of main(). never inside a loop, or
+    "random" returns the same value forever.
+  - when a REAL user is booking, their chosen seat is reserved for them; the
+    random riders just fill whatever's left. same queue, same function.
+
+
+=====================================================
+PART 5 — HOW THE CODE IS SPLIT
+=====================================================
+
+file tree (each .cpp has a matching .h with just the declarations — that's
+what others #include to call your functions without seeing your code):
+
+  carpool/
+  ├── main.cpp              LEAD: screen state machine + glue
+  ├── config.h             shared constants (everyone reads, nobody fights)
+  ├── types.h              shared structs (THE single source of truth)
+  │
+  ├── datastore.{h,cpp}    P1: driver array, linked-list history, file save/load
+  ├── seatqueue.{h,cpp}    P2: seat allocation queue (FIFO)
+  ├── paymentstack.{h,cpp} P2: per-person payment stack (pay + rollback)
+  ├── sorting.{h,cpp}      P3: merge / quick / insertion + timing comparison
+  ├── search.{h,cpp}       P3: linear + binary search
+  ├── leaderboard.{h,cpp}  P3: BST of drivers by rides served
+  ├── graph.{h,cpp}        LEAD: city graph + dijkstra
+  ├── routing.{h,cpp}      LEAD: multi-dest greedy route + segment fares
+  ├── simulation.{h,cpp}   LEAD: time tick + car movement + ambient spawn
+  └── ui.{h,cpp}           LEAD: termios raw mode + ANSI rendering
+  data/  drivers.txt, history.txt
+
+how the pieces depend on each other (top = independent, bottom = where it
+all comes together):
+
+       config.h + types.h          <- everyone reads, nobody edits alone
+              |
+   +----------+--------------------+-------------+
+ datastore  sorting/search/board   graph          (these know nothing
+ (P1)       (P3)                    (LEAD)          about each other)
+                                      |
+                                   routing (LEAD)  <- needs graph
+                                      |
+        +-----------+-----------------+
+   seatqueue/paystack ---- simulation
+     (P2)                    (LEAD)
+                               |
+                              main (LEAD)   <- the ONLY place everything meets
+
+the important takeaway: most modules are ISLANDS. sorting doesn't know the
+map exists. dijkstra doesn't know about seats. that's deliberate — it means
+you can build and test your part ALONE, with fake data, without waiting on
+anyone. all the messy "connecting" lives in simulation.cpp and main.cpp,
+which the lead owns.
+
+
+=====================================================
+PART 6 — HOW WE ACTUALLY WORK TOGETHER
+=====================================================
+
+THE ONE RULE: match the INPUT and OUTPUT in the spec. inside your function,
+do whatever you want — your own variable names, your own logic, your own
+helper functions. nobody reviews your internals. they only plug into your
+input/output.
+
+WHY THIS WORKS:
+  - everyone codes at the same time, in their own file. no blocking.
+  - integration is just calling functions. if it breaks, we know whose.
+  - you can prove your part works without anyone else's code (see below).
+
+TEST WITH FAKE DATA — this is how you know you're done before integration:
+make up an input by hand, run your function, check the output matches what
+the spec's test case says. example for sorting:
+
+  Driver fake[5] = { {id:1,rides:7}, {id:2,rides:2}, {id:3,rides:9}, ... };
+  mergeSortDrivers(fake, "rides");
+  // expect rides in order: 2, 7, 9, ...
+
+if your fake test passes, your function works in the real program. you never
+needed to see anyone else's file.
+
+THE ONE THING WE MUST AGREE ON FIRST: types.h and config.h.
+every "fake data" test assumes everyone agrees what a Driver looks like. the
+MOMENT someone quietly adds a field, the fake data drifts and integration day
+turns into a nightmare. so: we freeze types.h and config.h in the meeting,
+and after that nobody edits them alone — any change is announced to everyone.
+
+SHARING CODE: use github (one repo, a branch each, or just folders per person
+to start). don't email .cpp files around.
+
+
+=====================================================
+PART 7 — WHAT TO PREPARE, BY ROLE
+=====================================================
+
+read your row, then go read your functions in carpool_code_spec.txt.
+
+P1 — DATASTORE (arrays, linked list, files)
+  your job: define how a Driver/Booking is stored, build the 5 drivers,
+  keep ride history in a linked list, save everything to a text file and
+  load it back identical.
+  prepare: how you'll lay out a driver in a text line, and how you'll parse
+  it back. practice file read/write. your stuff is an island — test it with
+  fake drivers, save, load, check they're the same.
+  functions: initDrivers, addToHistory, saveDrivers, loadDrivers,
+             saveHistory, loadHistory.
+
+P2 — SEATQUEUE + PAYMENTSTACK (queue + stack)
+  your job: the seat queue (pop on booking, push back on trip-end/timeout)
+  and the payment stack (push each fare, pop to pay, roll back if one fails).
+  prepare: get comfortable with queue and stack operations. understand the
+  ONE wiring detail — assignSeat must set the driver's wait-start-time and
+  status when the first seat fills, because the lead's tick() reads those.
+  read PART 4.1 and 4.2 above twice.
+  functions: initQueue, assignSeat, returnSeats, countFilled,
+             pushPayments, processNext, rollbackAll.
+
+P3 — SORTING + SEARCH + LEADERBOARD (sorts, search, the BST)
+  your job: implement merge sort, quick sort, insertion sort (all sorting
+  drivers by a chosen field), a timing comparison that prints which is
+  fastest with Big-O, linear and binary search, AND the BST leaderboard
+  (insert drivers keyed on rides-served, in-order traversal gives them back
+  ranked). the BST is what satisfies the project's "tree" requirement.
+  prepare: know all three sorts cold (you'll explain them in the viva).
+  for binary search remember the precondition: the array must be sorted by
+  the key first. for the BST, practice insert + three walks: inorder (ranking,
+  also counts as DFS), level-order (row-by-row, counts as BFS, uses a queue),
+  and searchDriver (find a driver in O(log n)). pure island — test everything
+  with a fake driver array, no other files needed.
+  functions: mergeSortDrivers, quickSortDrivers, insertionSortDrivers,
+             compareTimings, linearSearchByCity, binarySearchById,
+             insertDriver, inorder, levelOrder, searchDriver.
+
+LEAD (you) — SIMULATION + UI + MAIN + GRAPH + ROUTING
+  your job: the whole connected core plus the routing math. the city graph,
+  dijkstra between two cities, the greedy multi-destination route, and the
+  SEGMENT FARE formula (PART 4.4 — the centerpiece, be ready to explain it).
+  then the tick that advances time and moves every car, the departDriver
+  burst (collect destinations -> route -> fares -> push to P2's stack),
+  completeTrip, the ambient random spawn, all the termios/ANSI rendering,
+  and the main state-machine loop.
+  this is every connection point, the routing algorithms, and the screen
+  drawing — the heaviest plate, but it's the part where everything meets, so
+  it has to be the one person who holds the whole picture.
+  prepare: dijkstra with a priority queue; BFS (reachability) and DFS
+  (all-paths) on the graph; greedy nearest-neighbour chaining;
+  reproduce the 385/175/70 fare example by hand; termios raw mode + ANSI.
+  functions: buildGraph, dijkstra, bfsReachable, dfsAllPaths, multiRoute,
+             segmentFares, isOnSegment, tick, departDriver, completeTrip,
+             makeRandomCustomer, maybeSpawnRider, the draw* screens,
+             raw-mode + readKey, main.
+
+
+=====================================================
+PART 8 — LOCK THESE IN THE NEXT MEETING (before any code)
+=====================================================
+
+  [ ] config.h values — agree on every number (RATE = 21, not 4).
+  [ ] types.h struct fields — write them out together, then FREEZE. no solo
+      edits after this. especially the Driver fields P2 writes and the lead
+      reads (status, wait-start-time).
+  [ ] THE CITY GRAPH — which cities connect to which, and the km on each
+      edge. this is the single most important missing piece: every routing test
+      case (dijkstra(1,5), multiRoute, the fares) needs these exact numbers.
+      draw it once, write the distances, it goes into buildGraph().
+  [ ] who owns main.cpp (the lead).
+  [ ] github repo + how we branch / share.
+  [ ] deadlines per role for "my functions pass their fake-data tests".
+
+
+=====================================================
+ONE-LINE SUMMARY TO REPEAT TO EVERYONE
+=====================================================
+"build your functions to match the input and output in the spec, test them
+with fake data on your own, and don't touch types.h after we freeze it —
+then integration is just plugging the pieces together."
