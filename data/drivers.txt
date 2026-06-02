@@ -1,5 +1,5 @@
 1 Driver1 1 1 0 11
 2 Driver2 2 2 0 10
-3 Driver3 3 3 0 9
+3 Driver3 3 3 0 22
 4 Driver4 4 4 1 8
 5 Driver5 5 5 0 5
