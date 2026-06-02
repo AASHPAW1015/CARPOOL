@@ -147,11 +147,11 @@ void maybeSpawnRider(queue<SeatSlot>& seatQueue, Driver drivers[],
     }
 
     spawnTimer += TIME_SCALE;
-    double currentInterval = anyoneWaiting ? 2.0 : SPAWN_INTERVAL;
+    double currentInterval = anyoneWaiting ? WAITING_SPAWN_INTERVAL : SPAWN_INTERVAL;
     if (spawnTimer < currentInterval) return;
     spawnTimer = 0;
 
-    int currentChance = anyoneWaiting ? 100 : SPAWN_CHANCE;
+    int currentChance = anyoneWaiting ? WAITING_SPAWN_CHANCE : SPAWN_CHANCE;
     if ((rand() % 100) >= currentChance) return;
     if (seatQueue.empty()) return;
 

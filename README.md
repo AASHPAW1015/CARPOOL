@@ -5,6 +5,58 @@ Every data structure and algorithm has a **real job** — nothing is bolted on j
 
 ---
 
+## Screenshots
+
+### Home Screen — Live Map & Driver Dashboard
+Cars update in real time: idle → waiting → travelling. The simulation runs in the background while you decide where to go.
+
+![Home Screen](screenshots/01_home.png)
+
+---
+
+### Destination Select — Arrow-Key Navigation
+Navigate the map with arrow keys. Your source city is locked; pick any other city as your destination and press Enter.
+
+![Destination Select](screenshots/02_dest_select.png)
+
+---
+
+### Seat Wait — Your Ride Card
+Shows your seat, your co-passengers' routes, and a live countdown until the car departs.
+
+![Seat Wait](screenshots/03_seat_wait.png)
+
+---
+
+### Trip In Progress — Route & Progress Bar
+Tracks your car's live position along the multi-stop route with a km counter and estimated time remaining.
+
+![Trip In Progress](screenshots/04_trip_progress.png)
+
+---
+
+### Payment Screen
+Your segment-calculated fare is shown at journey's end. Press `P` to pay or `S` to skip.
+
+![Payment](screenshots/05_payment.png)
+
+---
+
+### Payment Confirmed
+
+![Payment Confirmed](screenshots/06_payment_confirmed.png)
+
+---
+
+### Driver Leaderboard — Live Rankings + Sort Comparison
+Ranks all drivers by rides served today using a BST. Also benchmarks Merge, Quick, and Insertion Sort and verifies all three produce identical rankings.
+
+![Leaderboard](screenshots/07_leaderboard.png)
+
+> **To use these screenshots:** save the 7 images into a `screenshots/` folder in the project root with the filenames above.
+
+---
+
 ## What It Does
 
 Five cities. Five drivers — one parked in each city. A customer says *"I'm in City 2, take me to City 5."*  
@@ -33,20 +85,23 @@ g++ -std=c++11 *.cpp -o carpool
 
 ### Controls
 
-| Screen         | Key               | Action                        |
-|----------------|-------------------|-------------------------------|
-| Home           | `Enter`           | Start booking                 |
-| City Select    | `↑ ↓ ← →`        | Move highlight between cities |
-| City Select    | `Enter`           | Confirm city                  |
-| Payment        | `P`               | Pay fare                      |
-| Payment        | `S`               | Skip / cancel payment         |
-| Any screen     | `q`               | Quit (auto-saves state)       |
-| Home prompt    | `leaderboard`     | Show driver rankings          |
+| Screen         | Key / Command     | Action                                          |
+|----------------|-------------------|-------------------------------------------------|
+| Home           | `city 1` … `city 5` / `city mall` | Start booking from that city    |
+| Home           | `leaderboard`     | Show driver rankings                            |
+| Home           | `q`               | Quit (auto-saves state)                         |
+| Dest. Select   | `↑ ↓ ← →`        | Move highlight between cities                   |
+| Dest. Select   | `Enter`           | Confirm destination                             |
+| Dest. Select   | `q`               | Cancel, go back home                            |
+| Waiting (queue)| `cancel` + Enter  | Leave the city queue, go back home              |
+| Payment        | `P`               | Pay fare                                        |
+| Payment        | `S`               | Skip / cancel payment                           |
 
 ### Saved State
 
-- `data/drivers.txt` — driver state (persisted on quit)
-- `data/history.txt` — booking history (persisted on quit)
+- `data/drivers.txt` — driver state (auto-saved every ~60 s and on clean exit)
+- `data/history.txt` — booking history (auto-saved every ~60 s and on clean exit)
+- The `data/` directory is created automatically on first run.
 
 Delete these files for a fresh start.
 
@@ -104,17 +159,19 @@ fare(person) = SUM over every segment they ride:
 
 All shared constants live in `config.h`. Nobody hardcodes these anywhere else.
 
-| Constant       | Value  | Meaning                                    |
-|----------------|--------|--------------------------------------------|
-| `SPEED`        | 2      | km per sim-minute (every car, fixed)       |
-| `TIME_SCALE`   | 0.5    | sim-minutes per real second                |
-| `RATE`         | 21     | ₹ per km (full taxi rate, split per segment)|
-| `SEATS`        | 3      | seats per driver                           |
-| `DRIVERS`      | 5      | total drivers (one per city)               |
-| `CITIES`       | 6      | map nodes (5 cities + 1 junction)          |
-| `WAIT_TIMEOUT` | 10     | sim-minutes a half-empty car waits before leaving |
-| `SPAWN_INTERVAL`| 5     | sim-minutes between ambient rider rolls    |
-| `SPAWN_CHANCE` | 70     | % chance a random rider appears on a roll  |
+| Constant                  | Value | Meaning                                              |
+|---------------------------|-------|------------------------------------------------------|
+| `SPEED`                   | 2     | km per sim-minute (every car, fixed)                 |
+| `TIME_SCALE`              | 0.5   | sim-minutes per real second                          |
+| `RATE`                    | 21    | ₹ per km (full taxi rate, split per segment)         |
+| `SEATS`                   | 3     | seats per driver                                     |
+| `DRIVERS`                 | 5     | total drivers (one per city)                         |
+| `CITIES`                  | 6     | map nodes (5 cities + 1 junction)                    |
+| `WAIT_TIMEOUT`            | 10    | sim-minutes a half-empty car waits before leaving    |
+| `SPAWN_INTERVAL`          | 5     | sim-minutes between ambient rider rolls (idle)       |
+| `SPAWN_CHANCE`            | 70    | % chance a random rider appears on a roll (idle)     |
+| `WAITING_SPAWN_INTERVAL`  | 2     | sim-minutes between spawns when a car is waiting     |
+| `WAITING_SPAWN_CHANCE`    | 100   | % chance when a car is waiting — guaranteed          |
 
 ---
 
@@ -132,7 +189,13 @@ All 3 seats full          → LEAVE NOW
 
 ## The Ambient Home Screen
 
-The home screen isn't static. Cars fill up, depart, drive real Dijkstra routes, complete, and return home — all on their own, before the user books anything. Random riders trickle in every ~5 sim-minutes, using the **same `tick()` and `assignSeat()` as the real booking flow**. Cars often leave half-full — that's intentional, it looks real.
+The home screen isn't static. Cars fill up, depart, drive real Dijkstra routes, complete, and return home — all on their own, before the user books anything.
+
+- **Jumpstart** — 2 random cars are pre-seeded with riders at launch so the map is lively immediately.
+- **Randomised city targeting** — a Fisher-Yates shuffle picks which idle cars get riders each spawn event, so all 5 cities see action rather than always filling C1 first.
+- **Simultaneous boarding** — on each spawn event, 1–N idle cars are selected and each boards 1, 2, or 3 riders at once, producing a realistic mix of empty, half-full, and full departures.
+- **Waiting-car fast lane** — once a car has its first rider, spawn interval drops to `WAITING_SPAWN_INTERVAL` and chance becomes `WAITING_SPAWN_CHANCE` (guaranteed) to fill it quickly.
+- Uses the **same `tick()` and `assignSeat()`** as the real booking flow — no separate simulation path.
 
 ---
 
