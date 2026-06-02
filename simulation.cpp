@@ -140,64 +140,80 @@ Customer makeRandomCustomer(int& nextCustId) {
 void maybeSpawnRider(queue<SeatSlot>& seatQueue, Driver drivers[],
                      double simTime, double& spawnTimer, int& nextCustId) {
 
-    // 1. Is anyone waiting? (If so, boost the spawn rate to fill their car!)
+    // 1. Is anyone waiting? (boost spawn rate to fill their car faster)
     bool anyoneWaiting = false;
-    for (size_t i = 0; i < DRIVERS; ++i) {
-        if (drivers[i].status == WAITING) {
-            anyoneWaiting = true; 
-            break;
-        }
+    for (int i = 0; i < DRIVERS; ++i) {
+        if (drivers[i].status == WAITING) { anyoneWaiting = true; break; }
     }
 
     spawnTimer += TIME_SCALE;
-    double currentInterval = anyoneWaiting ? 2.0 : SPAWN_INTERVAL; // 2 sim-mins if waiting, else 45
-    
+    double currentInterval = anyoneWaiting ? 2.0 : SPAWN_INTERVAL;
     if (spawnTimer < currentInterval) return;
     spawnTimer = 0;
 
-    // roll 1: does a rider appear at all? (boost chance if waiting)
     int currentChance = anyoneWaiting ? 100 : SPAWN_CHANCE;
     if ((rand() % 100) >= currentChance) return;
-
     if (seatQueue.empty()) return;
 
-    // 2. Rotate queue to prioritize WAITING drivers (carpooling logic: fill active cars first)
+    Driver* targetDriver = nullptr;
+
     if (anyoneWaiting) {
-        int maxRotations = seatQueue.size();
+        // ── WAITING MODE: rotate queue to a WAITING car's slot ──
+        int maxRotations = (int)seatQueue.size();
         while (maxRotations-- > 0) {
             SeatSlot front = seatQueue.front();
             Driver* d = nullptr;
-            for (size_t i = 0; i < DRIVERS; ++i) {
+            for (int i = 0; i < DRIVERS; ++i) {
                 if (drivers[i].id == front.driverId) { d = &drivers[i]; break; }
             }
-            if (d && d->status == WAITING) break; // Found a waiting car's seat!
-            
-            // Rotate
+            if (d && d->status == WAITING) { targetDriver = d; break; }
             seatQueue.pop();
             seatQueue.push(front);
         }
+        if (!targetDriver) return;
+
+        // Spawn ONE rider to fill a waiting car's next seat
+        int src = targetDriver->currentCity;
+        int dst = src;
+        while (dst == src) dst = rand() % DRIVERS + 1;
+        Customer c;
+        c.id = nextCustId++; c.sourceCity = src; c.destCity = dst;
+        c.name = "rider#" + to_string(c.id);
+        assignSeat(seatQueue, c, drivers, simTime);
+
+    } else {
+        // ── IDLE MODE: pick a RANDOM empty driver (avoids sequential C1→C2→... pattern) ──
+        Driver* emptyList[DRIVERS];
+        int numEmpty = 0;
+        for (int i = 0; i < DRIVERS; ++i) {
+            if (drivers[i].status == EMPTY) emptyList[numEmpty++] = &drivers[i];
+        }
+        if (numEmpty == 0) return;
+
+        targetDriver = emptyList[rand() % numEmpty];
+
+        // Decide randomly: fill 1, 2, or all 3 seats at once
+        int seatsToFill = (rand() % SEATS) + 1;   // 1 .. SEATS
+        int src = targetDriver->currentCity;
+
+        for (int r = 0; r < seatsToFill; ++r) {
+            // Rotate queue to find the next available slot for this driver
+            bool found = false;
+            int maxRot = (int)seatQueue.size();
+            while (maxRot-- > 0) {
+                SeatSlot front = seatQueue.front();
+                if (front.driverId == targetDriver->id) { found = true; break; }
+                seatQueue.pop();
+                seatQueue.push(front);
+            }
+            if (!found) break;   // no more slots for this driver
+
+            int dst = src;
+            while (dst == src) dst = rand() % DRIVERS + 1;
+            Customer c;
+            c.id = nextCustId++; c.sourceCity = src; c.destCity = dst;
+            c.name = "rider#" + to_string(c.id);
+            assignSeat(seatQueue, c, drivers, simTime);
+        }
     }
-
-    // 3. Find the driver who is about to get this seat
-    SeatSlot nextSlot = seatQueue.front();
-    Driver* targetDriver = nullptr;
-    for (size_t i = 0; i < DRIVERS; ++i) {
-        if (drivers[i].id == nextSlot.driverId) { targetDriver = &drivers[i]; break; }
-    }
-
-    // roll 2: source city MUST match the car's current city so they can actually board!
-    int src = targetDriver ? targetDriver->currentCity : (rand() % DRIVERS + 1);
-
-    // roll 3: random different destination city
-    int dst = src;
-    while (dst == src) dst = rand() % DRIVERS + 1;
-
-    Customer c;
-    c.id         = nextCustId++;
-    c.sourceCity = src;
-    c.destCity   = dst;
-    c.name       = "rider#" + to_string(c.id);
-
-    // assignSeat pops the front slot (FIFO) and fills it.
-    assignSeat(seatQueue, c, drivers, simTime);
 }

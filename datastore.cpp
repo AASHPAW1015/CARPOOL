@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <sys/stat.h>
 
 using namespace std;
 
@@ -50,6 +51,7 @@ void addToHistory(list<Booking>& history, const Booking& booking) {
 //     id name homeCity currentCity status ridesServedToday
 // ---------------------------------------------------------------------------
 bool saveDrivers(const Driver drivers[]) {
+    mkdir("data", 0755);          // create data/ if it doesn't exist yet
     ofstream out(DRIVERS_FILE);
     if (!out) return false;
 
@@ -102,6 +104,7 @@ bool loadDrivers(Driver drivers[]) {
 //     bookingId customerId driverId seatNumber fare active
 // ---------------------------------------------------------------------------
 bool saveHistory(const list<Booking>& history) {
+    mkdir("data", 0755);
     ofstream out(HISTORY_FILE);
     if (!out) return false;
 

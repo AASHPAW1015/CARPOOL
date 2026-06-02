@@ -28,6 +28,7 @@
 #include <unistd.h>
 #include <termios.h>
 #include <sys/select.h>
+#include <sys/stat.h>
 #include <iostream>
 
 #include "types.h"
@@ -51,7 +52,8 @@ enum AppState {
     SEAT_WAIT,
     RIDE_SIM,
     PAYMENT,
-    LEADERBOARD
+    LEADERBOARD,
+    USER_QUEUE      // waiting for a seat to free up at sourceCity
 };
 
 // ── globals ──
@@ -73,6 +75,10 @@ static int    myCustomerId  = -1;
 static double myFare        = 0;
 static int    sourceCity    = 0;
 static int    nextBookingId = 1;
+
+// user-queue state: when all cars at sourceCity are full/travelling
+static Customer pendingUser;
+static bool     userQueued  = false;
 
 // destination-select navigation: cursor city id (1..5)
 static int destCursor = 0;
@@ -300,10 +306,11 @@ static void doMapSelect() {
 
                 bool ok = bookUserSeat(c);
                 if (!ok) {
-                    printf("  \033[31mNo seats available right now. Try again.\033[0m\n");
-                    fflush(stdout);
-                    usleep(2000000);
-                    state = HOME;
+                    // No seat right now – queue the user; they'll be auto-booked
+                    // when a car returns to their city
+                    pendingUser = c;
+                    userQueued  = true;
+                    state = USER_QUEUE;
                 } else {
                     fareComputed = false;
                     state = SEAT_WAIT;
@@ -385,6 +392,38 @@ static void doPayment() {
     // else: ignore, doPayment will be called again next tick
 }
 
+static void doUserQueue() {
+    // Re-attempt booking every tick — bookUserSeat sets myDriverId/mySeatNum on success
+    bool ok = bookUserSeat(pendingUser);
+    if (ok) {
+        fareComputed = false;
+        userQueued   = false;
+        state        = SEAT_WAIT;
+        return;
+    }
+
+    // Draw a simple waiting screen (full clear each tick is fine here)
+    printf("\033[2J\033[H");
+    string ind(18, ' ');
+    printf("\n");
+    printf("%s\033[1;33m  ⏳  QUEUED — WAITING FOR SEAT\033[0m\n\n", ind.c_str());
+    printf("%s  Your city  : \033[1mCity %d\033[0m\n",   ind.c_str(), pendingUser.sourceCity);
+    printf("%s  Destination: \033[1mCity %d\033[0m\n",   ind.c_str(), pendingUser.destCity);
+    printf("%s  Sim-time   : \033[1m%.0f min\033[0m\n\n",ind.c_str(), simTime);
+    printf("%s  All cars at your city are full or away.\n", ind.c_str());
+    printf("%s  You'll board automatically when one returns.\n\n", ind.c_str());
+    printf("%s  Type \033[1mcancel\033[0m + Enter to go back home.\n", ind.c_str());
+    fflush(stdout);
+
+    if (inputAvailable()) {
+        string input = readLine();
+        if (input == "cancel" || input == "q" || input == "quit") {
+            userQueued = false;
+            state      = HOME;
+        }
+    }
+}
+
 static void doLeaderboard() {
     drawLeaderboard(drivers);
 
@@ -399,6 +438,8 @@ static void doLeaderboard() {
 int main() {
     srand((unsigned)time(0));   // ONCE, here, never again
 
+    mkdir("data", 0755);        // ensure data/ directory exists
+
     graph = buildGraph();
 
     bool loaded = loadDrivers(drivers);
@@ -409,10 +450,26 @@ int main() {
     seatQueue = initQueue(drivers);
     history   = loadHistory();
 
+    // ── Jumpstart: pre-seed 2 random cars with riders so the map is lively
+    //   immediately rather than waiting 3+ minutes for the first spawn.
+    for (int j = 0; j < 2; ++j) {
+        spawnTimer = SPAWN_INTERVAL;   // trick maybeSpawnRider into firing now
+        maybeSpawnRider(seatQueue, drivers, simTime, spawnTimer, nextCustId);
+    }
+    spawnTimer = 0;   // reset so normal cadence resumes
+
+    static int tickCount = 0;
+
     while (running) {
         // advance simulation
         tick(drivers, seatQueue, simTime, graph);
         maybeSpawnRider(seatQueue, drivers, simTime, spawnTimer, nextCustId);
+
+        // periodic save every ~60 real seconds (75 ticks × 0.8 s)
+        if (++tickCount % 75 == 0) {
+            saveDrivers(drivers);
+            saveHistory(history);
+        }
 
         switch (state) {
             case HOME:            doHome();         break;
@@ -421,12 +478,13 @@ int main() {
             case RIDE_SIM:        doRideSim();      break;
             case PAYMENT:         doPayment();      break;
             case LEADERBOARD:     doLeaderboard();  break;
+            case USER_QUEUE:      doUserQueue();    break;
         }
 
         usleep(800000);  // ~0.8 real second per tick
     }
 
-    // shutdown
+    // clean shutdown — final save
     saveDrivers(drivers);
     saveHistory(history);
     printf("\033[0m\033[?25h");
