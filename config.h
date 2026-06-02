@@ -32,8 +32,8 @@ const int WAIT_TIMEOUT =
     10; // sim-minutes a half-empty driver waits before leaving
 
 // --- ambient home-screen sim (random rider generation) ---
-const int SPAWN_INTERVAL = 45; // sim-minutes between spawn rolls (calm pacing)
-const int SPAWN_CHANCE = 40;   // percent chance a rider appears on a roll
+const int SPAWN_INTERVAL = 5; // sim-minutes between spawn rolls (calm pacing)
+const int SPAWN_CHANCE = 70;  // percent chance a rider appears on a roll
 
 // Handy derived facts (not constants, just notes):
 //   car moves SPEED * TIME_SCALE = 5 km on screen per real second
