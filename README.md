@@ -1,5 +1,7 @@
 # 🚗 Carpool — Terminal Intercity Carpooling Simulator
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A terminal-based intercity carpooling app written in **C++** for a DSA mini-project.  
 Every data structure and algorithm has a **real job** — nothing is bolted on just to tick a box.
 
@@ -261,6 +263,12 @@ Most modules are **islands** — Dijkstra doesn't know about seats, sorting does
 
 - `isOnSegment` uses the **first** index of each city in `fullPath`. Fine for our routes (no revisited cities in practice). If a route ever revisits a city, fare attribution may be slightly off.
 - The spec's `tick()` called `returnSeats()` on partial departure, which would have duplicated queue slots. Fixed: `tick()` purges the departing driver's leftover slots via a `purgeDriverSeats` helper; `completeTrip()` returns all 3 seats when the car comes home. Queue stays balanced at exactly 15 slots.
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
 
 ---
 
