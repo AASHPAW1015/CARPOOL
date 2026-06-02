@@ -182,7 +182,9 @@ void maybeSpawnRider(queue<SeatSlot>& seatQueue, Driver drivers[],
         assignSeat(seatQueue, c, drivers, simTime);
 
     } else {
-        // ── IDLE MODE: pick a RANDOM empty driver (avoids sequential C1→C2→... pattern) ──
+        // ── IDLE MODE: fill MULTIPLE random empty cars simultaneously ──
+
+        // Collect all empty drivers and shuffle them (Fisher-Yates)
         Driver* emptyList[DRIVERS];
         int numEmpty = 0;
         for (int i = 0; i < DRIVERS; ++i) {
@@ -190,30 +192,43 @@ void maybeSpawnRider(queue<SeatSlot>& seatQueue, Driver drivers[],
         }
         if (numEmpty == 0) return;
 
-        targetDriver = emptyList[rand() % numEmpty];
+        for (int i = numEmpty - 1; i > 0; --i) {
+            int j = rand() % (i + 1);
+            Driver* tmp = emptyList[i]; emptyList[i] = emptyList[j]; emptyList[j] = tmp;
+        }
 
-        // Decide randomly: fill 1, 2, or all 3 seats at once
-        int seatsToFill = (rand() % SEATS) + 1;   // 1 .. SEATS
-        int src = targetDriver->currentCity;
+        // Pick how many cars to fill at once: 1 .. numEmpty
+        int carsToFill = (rand() % numEmpty) + 1;
 
-        for (int r = 0; r < seatsToFill; ++r) {
-            // Rotate queue to find the next available slot for this driver
-            bool found = false;
-            int maxRot = (int)seatQueue.size();
-            while (maxRot-- > 0) {
-                SeatSlot front = seatQueue.front();
-                if (front.driverId == targetDriver->id) { found = true; break; }
-                seatQueue.pop();
-                seatQueue.push(front);
+        for (int ci = 0; ci < carsToFill; ++ci) {
+            Driver* target = emptyList[ci];
+
+            // Skip if this car already became WAITING mid-loop (boarded earlier)
+            if (target->status != EMPTY) continue;
+
+            // Randomly fill 1, 2, or all 3 seats for this car
+            int seatsToFill = (rand() % SEATS) + 1;
+            int src = target->currentCity;
+
+            for (int r = 0; r < seatsToFill; ++r) {
+                // Rotate queue to bring this driver's next free slot to the front
+                bool found = false;
+                int maxRot = (int)seatQueue.size();
+                while (maxRot-- > 0) {
+                    SeatSlot front = seatQueue.front();
+                    if (front.driverId == target->id) { found = true; break; }
+                    seatQueue.pop();
+                    seatQueue.push(front);
+                }
+                if (!found) break;   // no more queue slots for this driver
+
+                int dst = src;
+                while (dst == src) dst = rand() % DRIVERS + 1;
+                Customer c;
+                c.id = nextCustId++; c.sourceCity = src; c.destCity = dst;
+                c.name = "rider#" + to_string(c.id);
+                assignSeat(seatQueue, c, drivers, simTime);
             }
-            if (!found) break;   // no more slots for this driver
-
-            int dst = src;
-            while (dst == src) dst = rand() % DRIVERS + 1;
-            Customer c;
-            c.id = nextCustId++; c.sourceCity = src; c.destCity = dst;
-            c.name = "rider#" + to_string(c.id);
-            assignSeat(seatQueue, c, drivers, simTime);
         }
     }
 }

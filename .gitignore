@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Project-specific context & prompt files
+carpool_code_spec.txt
+carpool_team_context.txt
+AI_MASTER_PROMPT.txt
+
+# Compiled binary
+carpool
+
+# Build artifacts
+*.out
+*.dSYM/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
