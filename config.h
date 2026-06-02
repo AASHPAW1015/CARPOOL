@@ -16,22 +16,24 @@
 #define CONFIG_H
 
 // --- simulation physics ---
-const int    SPEED        = 2;     // km per sim-minute (every car, fixed)
-const double TIME_SCALE   = 2.5;   // sim-minutes per 1 real second
+const int SPEED = 2;           // km per sim-minute (every car, fixed)
+const double TIME_SCALE = 0.5; // sim-minutes per 1 real second
 
 // --- money ---
-const int    RATE         = 21;    // rupees per km (full taxi rate; split per segment)
+const int RATE = 21; // rupees per km (full taxi rate; split per segment)
 
 // --- capacity ---
-const int    SEATS        = 3;     // seats per driver
-const int    DRIVERS      = 5;     // total drivers (one per city)
+const int SEATS = 3;   // seats per driver
+const int DRIVERS = 5; // total drivers (stationed at cities 1..5)
+const int CITIES = 6;  // total nodes in the map (5 cities + 1 junction node)
 
 // --- waiting ---
-const int    WAIT_TIMEOUT = 10;    // sim-minutes a half-empty driver waits before leaving
+const int WAIT_TIMEOUT =
+    10; // sim-minutes a half-empty driver waits before leaving
 
 // --- ambient home-screen sim (random rider generation) ---
-const int    SPAWN_INTERVAL = 45;  // sim-minutes between spawn rolls (calm pacing)
-const int    SPAWN_CHANCE   = 40;  // percent chance a rider appears on a roll
+const int SPAWN_INTERVAL = 45; // sim-minutes between spawn rolls (calm pacing)
+const int SPAWN_CHANCE = 40;   // percent chance a rider appears on a roll
 
 // Handy derived facts (not constants, just notes):
 //   car moves SPEED * TIME_SCALE = 5 km on screen per real second

@@ -20,6 +20,8 @@
 #include <list>
 #include "config.h"
 
+using namespace std;
+
 // --- a road from one city to another, with its distance ---
 struct Edge {
     int    toCity;
@@ -29,8 +31,8 @@ struct Edge {
 // --- a city node in the map graph ---
 struct City {
     int             id;          // 1..DRIVERS
-    std::string     name;
-    std::list<Edge> neighbors;   // adjacency list
+    string     name;
+    list<Edge> neighbors;   // adjacency list
 };
 
 // --- one seat in a driver's car ---
@@ -47,7 +49,7 @@ enum DriverStatus { EMPTY, WAITING, TRAVELLING };
 // --- a driver and their car ---
 struct Driver {
     int          id          = 0;
-    std::string  name;
+    string  name;
     int          homeCity    = 0;
     int          currentCity = 0;
     Seat         seats[SEATS];
@@ -56,7 +58,7 @@ struct Driver {
     DriverStatus status          = EMPTY;
     double       waitStartTime   = 0;   // sim-time the FIRST seat filled
                                         // (assignSeat WRITES this; tick READS it)
-    std::list<int> route;               // full path of city ids, set after seats lock
+    list<int> route;               // full path of city ids, set after seats lock
     double       totalKm         = 0;
     double       travelledKm     = 0;   // progress along route, for the animation
     int          ridesServedToday = 0;  // feeds the leaderboard / dashboard
@@ -65,7 +67,7 @@ struct Driver {
 // --- a person wanting a ride ---
 struct Customer {
     int         id         = 0;
-    std::string name;
+    string name;
     int         sourceCity = 0;
     int         destCity   = 0;
 };
